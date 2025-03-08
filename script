@@ -2,9 +2,10 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
 
 local Window = Rayfield:CreateWindow({
-   Name = "Arsenal lite",
+   Name = "Arsenal Lite",
    LoadingTitle = "Welcome to Arsenal Lite",
    LoadingSubtitle = "by YBashron",
    Theme = "Default",
@@ -32,8 +33,13 @@ local wallCheckEnabled = false
 local espEnabled = false
 local teamCheckEnabled = false
 local aimbotTeamCheck = false
+local godModeEnabled = false
+local rainbowESPEnabled = false
+local rainbowFOVEnabled = false
 local rightClickHeld = false
 local guiVisible = true
+local espPlayers = {}
+local tpEnabled = false
 
 UserInputService.InputBegan:Connect(function(input)
     if input.KeyCode == Enum.KeyCode.Insert then
@@ -79,14 +85,51 @@ VisualsTab:CreateToggle({
 })
 
 VisualsTab:CreateToggle({
-   Name = "Enable Team Check",
+   Name = "Enable Rainbow ESP",
    CurrentValue = false,
-   Flag = "TeamCheckToggle",
+   Flag = "RainbowESPToggle",
+   Callback = function(Value)
+      rainbowESPEnabled = Value
+   end,
+})
+
+VisualsTab:CreateToggle({
+   Name = "Enable Team Check for ESP",
+   CurrentValue = false,
+   Flag = "TeamCheckToggle", 
    Callback = function(Value)
       teamCheckEnabled = Value
    end,
 })
 
+GeneralTab:CreateToggle({
+   Name = "Enable God Mode",
+   CurrentValue = false,
+   Flag = "GodModeToggle", 
+   Callback = function(Value)
+      godModeEnabled = Value
+   end,
+})
+
+GeneralTab:CreateToggle({
+   Name = "Enable Rainbow FOV Circle",
+   CurrentValue = false,
+   Flag = "RainbowFOVToggle", 
+   Callback = function(Value)
+      rainbowFOVEnabled = Value
+   end,
+})
+
+GeneralTab:CreateToggle({
+   Name = "Enable Teleport to Nearest Enemy",
+   CurrentValue = false,
+   Flag = "TeleportToggle", 
+   Callback = function(Value)
+      tpEnabled = Value
+   end,
+})
+
+-- Aim Detection Functions
 UserInputService.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton2 then
         rightClickHeld = true
@@ -128,79 +171,123 @@ local function getClosestPlayer()
     return closestPlayer
 end
 
-local function createESP(player)
-    local box = Drawing.new("Square")
-    box.Color = Color3.new(1, 0, 0)
-    box.Thickness = 2
-    box.Filled = false
+-- Outline/Highlight Logic with Team Check
+local function updateESP(player)
+    if not espPlayers[player] then
+        local highlight = Drawing.new("Square")
+        highlight.Thickness = 2
+        highlight.Filled = false
+        highlight.Visible = false
+        highlight.Transparency = 1
+        highlight.Color = Color3.fromRGB(255, 0, 0)  -- Default Red
+        espPlayers[player] = highlight
+    end
 
-    RunService.RenderStepped:Connect(function()
-        local localPlayer = game.Players.LocalPlayer
-        local isEnemy = not teamCheckEnabled or (player.Team ~= localPlayer.Team)
+    local highlight = espPlayers[player]
+    local character = player.Character
+    if character then
+        local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+        if humanoidRootPart then
+            local screenPos, onScreen = game.Workspace.CurrentCamera:WorldToViewportPoint(humanoidRootPart.Position)
+            local isOnTeam = teamCheckEnabled and player.Team == game.Players.LocalPlayer.Team
 
-        if espEnabled and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and isEnemy then
-            local rootPart = player.Character.HumanoidRootPart
-            local vector, onScreen = game.Workspace.CurrentCamera:WorldToViewportPoint(rootPart.Position)
-            
-            if onScreen then
-                local size = Vector2.new(50, 100)
-                box.Size = size
-                box.Position = Vector2.new(vector.X - size.X / 2, vector.Y - size.Y / 2)
-                box.Visible = true
+            -- Only display ESP if the player is not on the same team, if team check is enabled
+            if onScreen and not isOnTeam then
+                highlight.Position = Vector2.new(screenPos.X - 25, screenPos.Y - 50)  -- Adjust to the center
+                highlight.Size = Vector2.new(50, 100)  -- Adjust size for better visibility
+                highlight.Visible = espEnabled
+
+                -- Rainbow Highlight Effect
+                if rainbowESPEnabled then
+                    highlight.Color = Color3.fromHSV(tick() % 5, 1, 1)
+                end
             else
-                box.Visible = false
+                highlight.Visible = false
             end
         else
-            box.Visible = false
+            highlight.Visible = false
         end
-    end)
-end
-
-for _, player in pairs(game.Players:GetPlayers()) do
-    if player ~= game.Players.LocalPlayer then
-        createESP(player)
+    else
+        highlight.Visible = false
     end
 end
 
-game.Players.PlayerAdded:Connect(function(player)
-    if player ~= game.Players.LocalPlayer then
-        createESP(player)
+-- God Mode
+game.Players.LocalPlayer.CharacterAdded:Connect(function(character)
+    if godModeEnabled then
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.Health = humanoid.Health -- Keeps health at max
+            humanoid.MaxHealth = math.huge
+        end
     end
 end)
 
-local function isTargetBehindCover(target)
-    local localPlayer = game.Players.LocalPlayer
-    local localCharacter = localPlayer.Character
-    local targetHumanoidRootPart = target.Character:FindFirstChild("HumanoidRootPart")
-
-    if not targetHumanoidRootPart then return true end  -- If no root part, assume behind cover
-
-    local ray = Ray.new(localCharacter.HumanoidRootPart.Position, targetHumanoidRootPart.Position - localCharacter.HumanoidRootPart.Position)
-    local hit, position = Workspace:FindPartOnRay(ray, localCharacter)
-
-    return hit ~= nil  -- Returns true if there is something blocking the line of sight (behind cover)
+-- TP Function (to nearest enemy)
+local function teleportToNearestEnemy()
+    local closestPlayer = getClosestPlayer()
+    if closestPlayer and closestPlayer.Character then
+        local targetHumanoidRootPart = closestPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if targetHumanoidRootPart then
+            game.Players.LocalPlayer.Character:SetPrimaryPartCFrame(targetHumanoidRootPart.CFrame + Vector3.new(0, 5, 0))  -- Teleports above the enemy
+        end
+    end
 end
 
+-- Rainbow FOV Circle
+local fovCircle = Drawing.new("Circle")
+fovCircle.Thickness = 2
+fovCircle.Filled = false
+fovCircle.Visible = false
+fovCircle.Radius = 150  -- Set the radius for the FOV circle
+
+local function updateFOVCircle()
+    local camera = game.Workspace.CurrentCamera
+    local mouse = game.Players.LocalPlayer:GetMouse()
+    local screenCenter = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+    local distance = (screenCenter - Vector2.new(mouse.X, mouse.Y)).Magnitude
+    fovCircle.Position = screenCenter
+
+    -- Rainbow FOV Effect
+    if rainbowFOVEnabled then
+        fovCircle.Color = Color3.fromHSV(tick() % 5, 1, 1)
+    else
+        fovCircle.Color = Color3.fromRGB(255, 0, 0)  -- Default Red
+    end
+
+    fovCircle.Visible = rainbowFOVEnabled
+    fovCircle.Radius = 150 + (distance / 10)  -- Adjust radius based on mouse movement for effect
+end
+
+-- Stronger Aimbot: Snapping to Head with Zero Smoothness
 RunService.RenderStepped:Connect(function()
     if aimbotEnabled and rightClickHeld then
         local closestPlayer = getClosestPlayer()
         if closestPlayer and closestPlayer.Character then
-            if wallCheckEnabled then
-                if not isTargetBehindCover(closestPlayer) then  -- If target is not behind cover, aim at them
-                    local targetHumanoidRootPart = closestPlayer.Character:FindFirstChild("HumanoidRootPart")
-                    if targetHumanoidRootPart then
-                        local camera = game.Workspace.CurrentCamera
-                        camera.CFrame = camera.CFrame:Lerp(CFrame.new(camera.CFrame.Position, targetHumanoidRootPart.Position), 0.1)
-                    end
-                end
-            else
-                local targetHumanoidRootPart = closestPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if targetHumanoidRootPart then
-                    local camera = game.Workspace.CurrentCamera
-                    camera.CFrame = camera.CFrame:Lerp(CFrame.new(camera.CFrame.Position, targetHumanoidRootPart.Position), 0.1)
-                end
+            local targetHumanoidRootPart = closestPlayer.Character:FindFirstChild("HumanoidRootPart")
+            local targetHead = closestPlayer.Character:FindFirstChild("Head")
+            if targetHumanoidRootPart then
+                local camera = game.Workspace.CurrentCamera
+                local aimPosition = targetHead or targetHumanoidRootPart
+                -- Snap directly to the target's head (most accurate aiming)
+                camera.CFrame = CFrame.new(camera.CFrame.Position, aimPosition.Position)  -- Instant snapping with no smoothing
             end
         end
+    end
+
+    -- Update ESP (Glow/Outline)
+    for _, player in pairs(game.Players:GetPlayers()) do
+        if player ~= game.Players.LocalPlayer then
+            updateESP(player)
+        end
+    end
+
+    -- Update Rainbow FOV Circle
+    updateFOVCircle()
+
+    -- Teleport to Nearest Enemy if enabled
+    if tpEnabled then
+        teleportToNearestEnemy()
     end
 end)
 
