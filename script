@@ -1,0 +1,207 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Window = Rayfield:CreateWindow({
+   Name = "Arsenal lite",
+   LoadingTitle = "Welcome to Arsenal Lite",
+   LoadingSubtitle = "by YBashron",
+   Theme = "Default",
+   DisableRayfieldPrompts = false,
+   DisableBuildWarnings = false,
+   ConfigurationSaving = {
+      Enabled = true,
+      FolderName = nil,
+      FileName = "Big Hub"
+   },
+   Discord = {
+      Enabled = false,
+      Invite = "noinvitelink",
+      RememberJoins = true
+   },
+   KeySystem = false
+})
+
+local AimbotTab = Window:CreateTab("Aimbot", 0)
+local VisualsTab = Window:CreateTab("Visuals", 0)
+local GeneralTab = Window:CreateTab("General", 0)
+
+local aimbotEnabled = false
+local wallCheckEnabled = false
+local espEnabled = false
+local teamCheckEnabled = false
+local aimbotTeamCheck = false
+local rightClickHeld = false
+local guiVisible = true
+
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.Insert then
+        guiVisible = not guiVisible
+        Rayfield:Toggle(guiVisible)
+    end
+end)
+
+AimbotTab:CreateToggle({
+   Name = "Enable Aimbot",
+   CurrentValue = false,
+   Flag = "AimbotToggle", 
+   Callback = function(Value)
+      aimbotEnabled = Value
+   end,
+})
+
+AimbotTab:CreateToggle({
+   Name = "Enable Team Check",
+   CurrentValue = false,
+   Flag = "AimbotTeamCheckToggle", 
+   Callback = function(Value)
+      aimbotTeamCheck = Value
+   end,
+})
+
+AimbotTab:CreateToggle({
+   Name = "Enable Wall Check",
+   CurrentValue = false,
+   Flag = "WallCheckToggle", 
+   Callback = function(Value)
+      wallCheckEnabled = Value
+   end,
+})
+
+VisualsTab:CreateToggle({
+   Name = "Enable ESP",
+   CurrentValue = false,
+   Flag = "ESPToggle",
+   Callback = function(Value)
+      espEnabled = Value
+   end,
+})
+
+VisualsTab:CreateToggle({
+   Name = "Enable Team Check",
+   CurrentValue = false,
+   Flag = "TeamCheckToggle",
+   Callback = function(Value)
+      teamCheckEnabled = Value
+   end,
+})
+
+UserInputService.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        rightClickHeld = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        rightClickHeld = false
+    end
+end)
+
+local function getClosestPlayer()
+    local closestPlayer = nil
+    local shortestDistance = math.huge
+    local localPlayer = game.Players.LocalPlayer
+    local localCharacter = localPlayer.Character
+    local localHumanoidRootPart = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
+
+    if localHumanoidRootPart then
+        for _, player in pairs(game.Players:GetPlayers()) do
+            if player ~= localPlayer and player.Character then
+                local isEnemy = not aimbotTeamCheck or (player.Team ~= localPlayer.Team)
+                
+                if isEnemy then
+                    local targetHumanoidRootPart = player.Character:FindFirstChild("HumanoidRootPart")
+                    if targetHumanoidRootPart then
+                        local distance = (localHumanoidRootPart.Position - targetHumanoidRootPart.Position).Magnitude
+                        if distance < shortestDistance then
+                            closestPlayer = player
+                            shortestDistance = distance
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return closestPlayer
+end
+
+local function createESP(player)
+    local box = Drawing.new("Square")
+    box.Color = Color3.new(1, 0, 0)
+    box.Thickness = 2
+    box.Filled = false
+
+    RunService.RenderStepped:Connect(function()
+        local localPlayer = game.Players.LocalPlayer
+        local isEnemy = not teamCheckEnabled or (player.Team ~= localPlayer.Team)
+
+        if espEnabled and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and isEnemy then
+            local rootPart = player.Character.HumanoidRootPart
+            local vector, onScreen = game.Workspace.CurrentCamera:WorldToViewportPoint(rootPart.Position)
+            
+            if onScreen then
+                local size = Vector2.new(50, 100)
+                box.Size = size
+                box.Position = Vector2.new(vector.X - size.X / 2, vector.Y - size.Y / 2)
+                box.Visible = true
+            else
+                box.Visible = false
+            end
+        else
+            box.Visible = false
+        end
+    end)
+end
+
+for _, player in pairs(game.Players:GetPlayers()) do
+    if player ~= game.Players.LocalPlayer then
+        createESP(player)
+    end
+end
+
+game.Players.PlayerAdded:Connect(function(player)
+    if player ~= game.Players.LocalPlayer then
+        createESP(player)
+    end
+end)
+
+local function isTargetBehindCover(target)
+    local localPlayer = game.Players.LocalPlayer
+    local localCharacter = localPlayer.Character
+    local targetHumanoidRootPart = target.Character:FindFirstChild("HumanoidRootPart")
+
+    if not targetHumanoidRootPart then return true end  -- If no root part, assume behind cover
+
+    local ray = Ray.new(localCharacter.HumanoidRootPart.Position, targetHumanoidRootPart.Position - localCharacter.HumanoidRootPart.Position)
+    local hit, position = Workspace:FindPartOnRay(ray, localCharacter)
+
+    return hit ~= nil  -- Returns true if there is something blocking the line of sight (behind cover)
+end
+
+RunService.RenderStepped:Connect(function()
+    if aimbotEnabled and rightClickHeld then
+        local closestPlayer = getClosestPlayer()
+        if closestPlayer and closestPlayer.Character then
+            if wallCheckEnabled then
+                if not isTargetBehindCover(closestPlayer) then  -- If target is not behind cover, aim at them
+                    local targetHumanoidRootPart = closestPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if targetHumanoidRootPart then
+                        local camera = game.Workspace.CurrentCamera
+                        camera.CFrame = camera.CFrame:Lerp(CFrame.new(camera.CFrame.Position, targetHumanoidRootPart.Position), 0.1)
+                    end
+                end
+            else
+                local targetHumanoidRootPart = closestPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if targetHumanoidRootPart then
+                    local camera = game.Workspace.CurrentCamera
+                    camera.CFrame = camera.CFrame:Lerp(CFrame.new(camera.CFrame.Position, targetHumanoidRootPart.Position), 0.1)
+                end
+            end
+        end
+    end
+end)
+
+print("Arsenal Lite loaded!")
